@@ -1,101 +1,75 @@
+import telebot
+from telebot import types
 import os
-import subprocess
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = "ISI_TOKEN_BOT_FATHER"
 
-# ====== START ======
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Kirim MP3 atau MP4 ke saya.")
+bot = telebot.TeleBot(TOKEN)
 
-# ====== HANDLE MP3 ======
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.audio.get_file()
-    input_path = "audio.mp3"
-    output_path = "voice.ogg"
+user_files = {}
 
-    await file.download_to_drive(input_path)
+# ===== HANDLE FILE =====
+@bot.message_handler(content_types=['video', 'audio'])
+def handle_file(message):
+    file_id = None
+    file_type = None
 
-    # convert ke voice note (opus)
-    subprocess.call([
-        "ffmpeg", "-i", input_path,
-        "-c:a", "libopus",
-        "-b:a", "64k",
-        "-vbr", "on",
-        output_path
-    ])
+    if message.content_type == 'video':
+        file_id = message.video.file_id
+        file_type = "video"
+    elif message.content_type == 'audio':
+        file_id = message.audio.file_id
+        file_type = "audio"
 
-    await update.message.reply_voice(voice=open(output_path, "rb"))
+    file_info = bot.get_file(file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
 
-# ====== HANDLE VIDEO ======
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.video.get_file()
-    input_path = "video.mp4"
+    input_path = f"input_{message.chat.id}"
+    with open(input_path, 'wb') as f:
+        f.write(downloaded_file)
 
-    await file.download_to_drive(input_path)
+    user_files[message.chat.id] = input_path
 
-    keyboard = [
-        [
-            InlineKeyboardButton("🎬 Video Note", callback_data="video_note"),
-            InlineKeyboardButton("🎵 MP3", callback_data="mp3_from_video"),
-        ]
-    ]
+    markup = types.InlineKeyboardMarkup()
 
-    await update.message.reply_text(
-        "Pilih format convert:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    btn1 = types.InlineKeyboardButton("🎥 Video Note", callback_data="vn")
+    btn2 = types.InlineKeyboardButton("🎤 Voice Note", callback_data="vnvoice")
 
-# ====== BUTTON ACTION ======
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    markup.add(btn1, btn2)
 
-    input_path = "video.mp4"
+    if file_type == "video":
+        btn3 = types.InlineKeyboardButton("🎵 MP3", callback_data="mp3")
+        markup.add(btn3)
 
-    if query.data == "video_note":
-        output_path = "circle.mp4"
+    bot.send_message(message.chat.id, "Pilih format konversi:", reply_markup=markup)
 
-        subprocess.call([
-            "ffmpeg", "-i", input_path,
-            "-vf", "crop='min(in_w,in_h)':'min(in_w,in_h)'",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "30",
-            "-c:a", "aac",
-            output_path
-        ])
 
-        await query.message.reply_video_note(video_note=open(output_path, "rb"))
+# ===== CALLBACK BUTTON =====
+@bot.callback_query_handler(func=lambda call: True)
+def callback(call):
+    chat_id = call.message.chat.id
+    input_path = user_files.get(chat_id)
 
-    elif query.data == "mp3_from_video":
-        output_path = "audio.mp3"
+    if not input_path:
+        bot.send_message(chat_id, "File tidak ditemukan.")
+        return
 
-        subprocess.call([
-            "ffmpeg", "-i", input_path,
-            "-q:a", "2",
-            "-map", "a",
-            output_path
-        ])
+    # VIDEO NOTE (lingkaran)
+    if call.data == "vn":
+        output = "output_vn.mp4"
+        os.system(f"ffmpeg -i {input_path} -vf crop='min(iw,ih)':'min(iw,ih)',scale=512:512 -c:v libx264 -preset ultrafast -c:a copy {output}")
+        bot.send_video_note(chat_id, open(output, 'rb'))
 
-        await query.message.reply_audio(audio=open(output_path, "rb"))
+    # VOICE NOTE (ogg)
+    elif call.data == "vnvoice":
+        output = "output_voice.ogg"
+        os.system(f"ffmpeg -i {input_path} -vn -acodec libopus -b:a 64k {output}")
+        bot.send_voice(chat_id, open(output, 'rb'))
 
-# ====== MAIN ======
-app = ApplicationBuilder().token(TOKEN).build()
+    # MP3 (hanya video)
+    elif call.data == "mp3":
+        output = "output.mp3"
+        os.system(f"ffmpeg -i {input_path} -vn -ab 192k {output}")
+        bot.send_audio(chat_id, open(output, 'rb'))
 
-app.add_handler(CommandHandler("start", start))
-
-app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
-app.add_handler(MessageHandler(filters.VIDEO, handle_video))
-
-app.add_handler(CallbackQueryHandler(button))
-
-app.run_polling()
+bot.polling()
