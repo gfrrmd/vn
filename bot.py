@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 import os
 
-TOKEN = "ISI_TOKEN_BOT_FATHER"
+TOKEN = "8726822525:AAE9C5egUSQF8jaDHVeaD4s5SR0nKLX6A1M"
 
 bot = telebot.TeleBot(TOKEN)
 
