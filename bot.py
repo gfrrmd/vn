@@ -2,7 +2,10 @@ import telebot
 from telebot import types
 import os
 
-TOKEN = "8726822525:AAE9C5egUSQF8jaDHVeaD4s5SR0nKLX6A1M"
+TOKEN = os.getenv("BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("BOT_TOKEN belum diatur di environment variables!")
 
 bot = telebot.TeleBot(TOKEN)
 
